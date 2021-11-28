@@ -1,0 +1,154 @@
+- Spring Security.
+
+1.Добавляется зависимость: spring-boot-starter-web.
+
+*Spring Security создает пользователя с именем user и автоматически сгенерированным паролем,который можно посмотреть
+в консоли.
+
+*Создается страница с формой для ввода имени и пароля -имеем Form-based аутентификацию.
+
+*Имя и пароль реально проверяются.
+
+*Все URL оказываются недоступны, пока мы не "залогинимся" под этим пользователем.
+
+*И еще создается страница,где можно "разлогиниться".Она находится по адресу /logout.
+
+!!!Это называется in-Memory authentication-пользователь хтанится не в базе и не где то на сервере, а в ОП.!!!
+
+
+2.Понятия Аутентификация/Авторизация.
+
+*АУТЕНТИФИКАЦИЯ-приложение спрашивает кто мы->мы даем необходимые данные->приложения проверяет эти данные,и отдает ОК ли
+все или нет.(Authentication)
+
+*АВТОРИЗАЦИЯ-после того как пользователь подтвердил свою личность,проходит авторизация,которая выдает ему права или же
+наоборот отказ.(Authorization)
+
+
+3.Настройки авторизации.
+
+*По умолчанию Spring Security дает доступ ко всем URL если пользователь авторизировался.Но так не должно быть, нам нужно,
+чтобы у каждого User были свои какие то страничики по которым он может передвигаться и чтобы у него были заблокированы
+другие страницы, по этому в ручную переписываем метод configure() у WebSecurityConfigurerAdapter. Как только мы
+переопределили метод,мы сразу же отменили дефолтную настройку.Теперь распределение прав нам необходимо описать самим:
+
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter{
+       //другие методы
+       @Override
+       protected void configure(HttpSecurity http) throws Exception {
+       http.authorizeRequests()//хотим поменять URL по данным ниже
+       //передаем сам URL по которому может переходить только пользователь с парвом ADMIN
+                .antMatchers("/admin/**").hasRole("ADMIN")
+                .antMatchers("/user/**").hasAnyRole("USER","ADMIN")
+       //доступ для всех на корень приложения
+                .antMatchers("/**").permitAll()
+                .and.formLogin();
+
+       }
+}
+
+
+4.HEADERS Authorization:
+
+*сейчас:
+Authorization: Basic base64(username:password)
+
+!А нужно добиться того чтобы данные о пользователи были зашифрованны!
+
+*как должно быть:
+Authorization:Bearer
+eertyuJNMKL344HJKfghjklFGH233ghjkGHJ32edfghjk_FNFNFNkkd22JFFKJ_FNFN.fhhfJJJ33
+
+в Postman авторизация передается в заголовке Authorization. То есть наш сервер должен шифровать данные и отдавать в виде
+token.
+
+
+5.Что такое Token? JWT(JSON Web Token).
+
+*Когда клиент заходит на сервер, он регестрируется,сервер запоминает что у него есть такой пользователь в базе и отдает ему
+token.Клиент может дальше вставлять все свои запросы и так дальше сервер поймет кто перед ним.
+
+*До JWT мы получали, что вся информация о пользователях храниться на сервере, сейчас сервер не хранит всю информацию
+передает все клиенту и клиент уже сам через JWT передает информацию о себе.
+
+
+6.Способы аутентификации.
+
+*Первый способ:
+Реализовать UserDetailsService с переопределнным методом loadUserByUsername(), где достается из БД наш пользователь и
+формируется объект UserDetails:
+
+@Service
+public class AccountServiceRe implements UserDetailsService {
+
+    @Autowired
+    private AccountEntityRepository accountEntityRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String accountLogin) throws UsernameNotFoundException {
+    Account account = accountEntityRepository.findByLogin(accountLogin);
+    if(account == null) {
+    throw new UsernameNotFoundException("Unknown user: " + accountLogin);
+    }
+
+    UserDetails user = User.builder()
+            .username(account.getLogin())
+            .password(account.getPassword())
+            .roles(account.getRole())
+            .build();
+
+    return user;
+    }
+}
+
+*Второй способ:
+Реализовать AuthenticationProvide, по сути тоже самое только мы переопределяем
+метод authenticate(Authentication authentication), который позволит сравнивать данные, которые к нам приходят.
+
+@Component
+public class CustomAuthenticationProvider implements AuthenticationProvider {
+    @Autowired
+    private MyUserRepository dao;
+
+    @Override
+    public Authentication authentication(Authentication authentication) throws AuthenticationException{
+    String userName = authentication.getName();
+    String password = authentication.getCredentials().toString();
+    //получаем пользователя
+    MyUser myUser = dao.findByLogin(userName);
+
+    //смотрим, найден ли пользователь в базе
+    if (myUser == null){
+    throw new BadCredentialsException("Unknown user: " + userName);
+    }
+    if(!password.equals(myUser.getPassword())) {
+        throw new BadCredentialsException("Bad password");
+    }
+    UserDetails principal = User.builder()
+                .username(myUser.getLogin())
+                .password(myUser.getPassword())
+                .roles(myUser.getRole())
+                .build();
+
+    return new UsernamePasswordAuthenticationToken(principal,password,principal.getAuthorities());
+    }
+    @Override
+    public boolean supports(Class<?> authentication) {
+    return authentication.equals(UsernamePasswordAuthenticationToken.class);
+    }
+}
+
+
+7.Перейдем к коду.
+Добавленные зависимости:
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+
+<dependency>
+<groupId>io.jsonwebtoken</groupId>
+<artifactId>jjwt</artifactId>
+<version>0.9.1</version>
+</dependency>
